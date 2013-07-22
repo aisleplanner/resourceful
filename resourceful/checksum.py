@@ -34,6 +34,11 @@ def mtime(path):
     return datetime.fromtimestamp(latest).isoformat()[:22]
 
 
+def file_mtime(path):
+    mtime = os.path.getmtime(path)
+    return datetime.fromtimestamp(mtime).isoformat()[:22]
+
+
 def md5(path):
     chcksm = hashlib.md5()
     for path in sorted(list(list_directory(path, include_directories=False))):
@@ -49,4 +54,20 @@ def md5(path):
                 chcksm.update(chunk)
         finally:
             f.close()
+    return chcksm.hexdigest()
+
+
+def file_md5(path):
+    chcksm = hashlib.md5()
+    try:
+        f = open(path, 'rb')
+        while True:
+            # 256kb chunks.
+            # XXX how to optimize chunk size?
+            chunk = f.read(0x40000)
+            if not chunk:
+                break
+            chcksm.update(chunk)
+    finally:
+        f.close()
     return chcksm.hexdigest()

@@ -1,25 +1,29 @@
 import os
 import re
 import time
+import datetime
 
 import pytest
 
-from resourceful import (Library,
-                       Resource,
-                       NeededResources,
-                       Group,
-                       init_needed,
-                       del_needed,
-                       get_needed,
-                       clear_needed,
-                       register_inclusion_renderer,
-                       ConfigurationError,
-                       bundle_resources,
-                       LibraryDependencyCycleError,
-                       NEEDED,
-                       UnknownResourceExtensionError,
-                       UnknownResourceError,
-                       set_resource_file_existence_checking, compat)
+from resourceful import (
+    Library,
+    Resource,
+    NeededResources,
+    Group,
+    init_needed,
+    del_needed,
+    get_needed,
+    clear_needed,
+    register_inclusion_renderer,
+    ConfigurationError,
+    bundle_resources,
+    LibraryDependencyCycleError,
+    NEEDED,
+    UnknownResourceExtensionError,
+    UnknownResourceError,
+    set_resource_file_existence_checking,
+    compat
+)
 from resourceful.core import inclusion_renderers
 from resourceful.core import thread_local_needed_data
 from resourceful.core import ModeResourceDependencyError
@@ -553,58 +557,140 @@ def test_library_url_script_name_base_url():
             'http://example.com/something/resourceful/foo')
 
 
-def test_library_url_version_hashing(tmpdir):
+def test_resource_url_version_hashing_bydate(tmpdir):
     foo = Library('foo', tmpdir.strpath)
+    x1 = Resource(foo, 'a.js', version=True)
+    x2 = Resource(foo, 'b.css', version=True)
+
+    x1_mtime = 1356998400
+    x1_datetime = datetime.datetime.fromtimestamp(x1_mtime)
+    x2_mtime = 1364774400
+    x2_datetime = datetime.datetime.fromtimestamp(x2_mtime)
+
+    x1_file = tmpdir.join('a.js')
+    x1_file.write('/* test */')
+    x1_file.setmtime(x1_mtime)
+    x2_file = tmpdir.join('b.css')
+    x2_file.write('/* test */')
+    x2_file.setmtime(x2_mtime)
 
     needed = NeededResources(versioning=True)
-    url = needed.library_url(foo)
-    assert re.match('/resourceful/foo/:version:[0-9T:.-]*$', url)
+    needed.need(x1)
+    needed.need(x2)
+    matcher = re.compile('''
+<link rel="stylesheet" type="text/css" href="/resourceful/([^"]+)" />
+<script type="text/javascript" src="/resourceful/([^"]+)"></script>'''[1:])
+    match = matcher.match(needed.render())
+    assert match is not None
+    groups = match.groups()
+    css_path = groups[0]
+    assert css_path[0:4] == 'foo/'
+    assert css_path[-5:] == 'b.css'
+    css_version = css_path[4:-6]
+    assert css_version == ':version:' + x2_datetime.isoformat()[:22]
 
-    # The md5 based version URL is available through the
-    # `versioning_use_md5` parameter:
-    needed = NeededResources(versioning=True, versioning_use_md5=True)
-    md5_url = needed.library_url(foo)
-    assert url != md5_url
-
-    # If the Library defines a version, the version is used.
-    bar = Library('bar', '', version='1')
-    assert needed.library_url(bar) == '/resourceful/bar/:version:1'
+    js_path = groups[1]
+    assert js_path[0:4] == 'foo/'
+    assert js_path[-4:] == 'a.js'
+    js_version = js_path[4:-5]
+    assert js_version == ':version:' + x1_datetime.isoformat()[:22]
 
 
-def test_library_url_hashing_norecompute(tmpdir):
+def test_resource_url_version_hashing_bymd5(tmpdir):
     foo = Library('foo', tmpdir.strpath)
+    x1 = Resource(foo, 'a.js', version=True)
+    x2 = Resource(foo, 'b.css', version=True)
+
+    x1_file = tmpdir.join('a.js')
+    x1_file.write('/* test1 */')
+    x2_file = tmpdir.join('b.css')
+    x2_file.write('/* test2 */')
+
+    needed = NeededResources(versioning=True, versioning_use_md5=True)
+    needed.need(x1)
+    needed.need(x2)
+    matcher = re.compile('''
+<link rel="stylesheet" type="text/css" href="/resourceful/([^"]+)" />
+<script type="text/javascript" src="/resourceful/([^"]+)"></script>'''[1:])
+    match = matcher.match(needed.render())
+    assert match is not None
+    groups = match.groups()
+    css_path = groups[0]
+    assert css_path[0:4] == 'foo/'
+    assert css_path[-5:] == 'b.css'
+    css_version = css_path[4:-6]
+    assert css_version == ':version:b73f1f3e3d512e180603faf9a1218803'
+
+    js_path = groups[1]
+    assert js_path[0:4] == 'foo/'
+    assert js_path[-4:] == 'a.js'
+    js_version = js_path[4:-5]
+    assert js_version == ':version:8a58cfef526fbdf6d2b1e737bf515124'
+
+
+def test_resource_url_version_hashing_bystring(tmpdir):
+    # If the Library defines a version, the version is used.
+    bar = Library('bar', '')
+    x3 = Resource(bar, 'a.js', version='2.2')
+    needed = NeededResources(versioning=True)
+    needed.need(x3)
+    matcher = re.compile('''
+<script type="text/javascript" src="/resourceful/([^"]+)"></script>'''[1:])
+    match = matcher.match(needed.render())
+    assert match is not None
+    groups = match.groups()
+    js_path = groups[0]
+    assert js_path[0:4] == 'bar/'
+    assert js_path[-4:] == 'a.js'
+    js_version = js_path[4:-5]
+    assert js_version == ':version:2.2'
+
+
+def test_resource_url_hashing_norecompute(tmpdir):
+    foo = Library('foo', tmpdir.strpath)
+    x1 = Resource(foo, 'a.js', version=True)
+
+    x1_mtime = 1356998400
+
+    x1_file = tmpdir.join('a.js')
+    x1_file.write('/* test */')
+    x1_file.setmtime(x1_mtime)
 
     needed = NeededResources(versioning=True, recompute_hashes=False)
+    needed.need(x1)
+    rendered = needed.render()
 
-    url = needed.library_url(foo)
+    # now write to the file again
+    x1_file.write('/* test */')
 
-    # now create a file
-    resource = tmpdir.join('test.js')
-    resource.write('/* test */')
-
-    # since we're not re-computing hashes, the hash in the URL won't change
-    assert needed.library_url(foo) == url
+    # since we're not recomputing, the rendered html shouldn't change
+    assert needed.render() == rendered
 
 
-def test_library_url_hashing_recompute(tmpdir):
+def test_resource_url_hashing_recompute(tmpdir):
     foo = Library('foo', tmpdir.strpath)
+    x1 = Resource(foo, 'a.js', version=True)
+
+    x1_mtime = 1356998400
+
+    x1_file = tmpdir.join('a.js')
+    x1_file.write('/* test */')
+    x1_file.setmtime(x1_mtime)
 
     needed = NeededResources(versioning=True, recompute_hashes=True)
-
-    url = needed.library_url(foo)
-
-    # now create a file
-    resource = tmpdir.join('test.js')
+    needed.need(x1)
+    rendered = needed.render()
 
     time.sleep(0.5)
     # Sleep extra long on filesystems that report in seconds
     # instead of milliseconds.
     if os.path.getmtime(os.curdir).is_integer():
         time.sleep(1)
-    resource.write('/* test */')
+    # now write to the file again
+    x1_file.write('/* test */')
 
     # the hash is recalculated now, so it changes
-    assert needed.library_url(foo) != url
+    assert needed.render() != rendered
 
 
 def test_html_insert():
@@ -879,7 +965,7 @@ def test_resource_subclass_render():
     foo = Library('foo', '')
 
     class MyResource(Resource):
-        def render(self, library_url):
+        def render(self, library_url, version_method, recompute_hashes):
             return '<myresource reference="%s/%s"/>' % (library_url, self.relpath)
 
     a = MyResource(foo, 'printstylesheet.css')

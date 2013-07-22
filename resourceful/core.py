@@ -281,7 +281,7 @@ class Renderable(object):
 
     A renderable must have a library attribute and a dependency_nr.
     """
-    def render(self, library_url):
+    def render(self, library_url, version_method, recompute_hashes):
         """Render this renderable as something to insert in HTML.
 
         This returns a snippet.
@@ -369,13 +369,16 @@ class Resource(Renderable, Dependable):
                  minifier=NOTHING,
                  compiler=NOTHING,
                  source=None,
-                 mode_parent=None):
+                 mode_parent=None,
+                 version=None):
+        self._version_segment = None
         self.library = library
         self.relpath = relpath
         self.dirname, self.filename = os.path.split(relpath)
         if self.dirname and not self.dirname.endswith('/'):
             self.dirname += '/'
         self.ext = os.path.splitext(self.relpath)[1]
+        self.version = version
 
         self.mode_parent = mode_parent
         if compiler is NOTHING:
@@ -526,8 +529,18 @@ class Resource(Renderable, Dependable):
             self.compiler(self, force=force)
             self.minifier(self, force=force)
 
-    def render(self, library_url):
-        return self.renderer('%s/%s' % (library_url, self.relpath))
+    def calculate_version(self, version_method):
+        if self.version is None or not self.version:
+            return ''
+        elif isinstance(self.version, basestring):
+            return VERSION_PREFIX + self.version + "/"
+        else:
+            return VERSION_PREFIX + version_method(self.fullpath()) + "/"
+
+    def render(self, library_url, version_method, recompute_hashes):
+        if self._version_segment is None or recompute_hashes:
+            self._version_segment = self.calculate_version(version_method)
+        return self.renderer('%s/%s%s' % (library_url, self._version_segment, self.relpath))
 
     def __repr__(self):
         return "<Resource '%s' in library '%s'>" % (
@@ -644,6 +657,7 @@ class Slot(Renderable, Dependable):
 
 class FilledSlot(Renderable, Dependable):
     def __init__(self, slot, resource):
+        self.resource = resource
         self.library = resource.library
         self.relpath = resource.relpath
         self.dirname, self.filename = resource.dirname, resource.filename
@@ -671,8 +685,8 @@ class FilledSlot(Renderable, Dependable):
 
         # XXX how do slots interact with rollups?
 
-    def render(self, library_url):
-        return self.renderer('%s/%s' % (library_url, self.relpath))
+    def render(self, library_url, version_method, recompute_hashes):
+        return self.resource.render(library_url, version_method, recompute_hashes)
 
     def __repr__(self):
         return "<FilledSlot '%s' in library '%s'>" % (
@@ -842,9 +856,9 @@ class NeededResources(object):
                  ):
         self._versioning = versioning
         if versioning_use_md5:
-            self._version_method = resourceful.checksum.md5
+            self._version_method = resourceful.checksum.file_md5
         else:
-            self._version_method = resourceful.checksum.mtime
+            self._version_method = resourceful.checksum.file_mtime
 
         self._recompute_hashes = recompute_hashes
         self._bottom = bottom
@@ -961,11 +975,6 @@ class NeededResources(object):
         if self._publisher_signature:
             path.append(self._publisher_signature)
         path.append(library.name)
-        if self._versioning:
-            path.append(
-                library.signature(
-                    recompute_hashes=self._recompute_hashes,
-                    version_method=self._version_method))
         return '/'.join(path)
 
     def render(self):
@@ -999,7 +1008,7 @@ class NeededResources(object):
             if library_url is None:
                 library_url = self._url_cache[library.name] = self.library_url(
                     library)
-            result.append(resource.render(library_url))
+            result.append(resource.render(library_url, version_method=self._version_method, recompute_hashes=self._recompute_hashes))
         return '\n'.join(result)
 
     def render_into_html(self, html):
