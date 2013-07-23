@@ -1239,7 +1239,8 @@ class Bundle(Renderable):
         """
         return self._resources
 
-    def render(self, library_url):
+    def render(self, library_url, version_method, recompute_hashes):
+        # TODO: handle versioning
         # URL may become too long:
         # http://www.boutell.com/newfaq/misc/urllength.html
         return self.renderer('%s/%s' % (library_url, self.relpath))
