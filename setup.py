@@ -15,6 +15,7 @@ readme = os.path.join(os.path.dirname(__file__), 'README.rst')
 
 requires = [
     "WebOb >= 1.2.3",
+    "which >= 1.1.0",
 ]
 
 
